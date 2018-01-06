@@ -1,27 +1,28 @@
 package main
 
 import (
-	"net/http"
-	"fmt"
-	"io/ioutil"
-	"encoding/json"
-	"strconv"
-	"encoding/base64"
-	"bytes"
-	"gopkg.in/gcfg.v1"
 	"bufio"
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"gopkg.in/gcfg.v1"
+	"io/ioutil"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"text/template"
 )
 
 /*
 TODO:
  + - Unseal using stdin
- - Save to file
+ + - Save to file
  - Separate function
  - Function for the connection
  - Connection using proxy
- */
+*/
 
 type сonsulServiceResp struct {
 	ID              string
@@ -29,38 +30,38 @@ type сonsulServiceResp struct {
 	Address         string
 	Datacenter      string
 	TaggedAddresses struct {
-		Lan 			string
-		Wan 			string
+		Lan string
+		Wan string
 	}
 	NodeMeta struct {
 	}
-	ServiceID		string
-	ServiceName		string
-	ServiceTags		[]string
-	ServiceAddress	string
-	ServicePort		int
-	ServiceEnableTagOverride	bool
-	CreateIndex     int
-	ModifyIndex		int
+	ServiceID                string
+	ServiceName              string
+	ServiceTags              []string
+	ServiceAddress           string
+	ServicePort              int
+	ServiceEnableTagOverride bool
+	CreateIndex              int
+	ModifyIndex              int
 }
 
 type сonsulKVResp struct {
-	LockIndex 		int
-	Key				string
-	Flags			int
-	Value			string
-	CreateIndex		int
-	ModifyIndex		int
+	LockIndex   int
+	Key         string
+	Flags       int
+	Value       string
+	CreateIndex int
+	ModifyIndex int
 }
 
 type vaultHealthResp struct {
-	ClusterID		string
-	ClusterName		string
-	Version			string
-	ServerTimeUtc	int
-	Standby			bool
-	Sealed			bool
-	Initialized		bool
+	ClusterID     string
+	ClusterName   string
+	Version       string
+	ServerTimeUtc int
+	Standby       bool
+	Sealed        bool
+	Initialized   bool
 }
 
 type vaultInitResp struct {
@@ -71,24 +72,30 @@ type vaultInitResp struct {
 
 type Config struct {
 	Vault struct {
-		Scheme 	string
-		Name	string
+		Scheme string
+		Name   string
 	}
-	Init struct{
-		Save 	bool
-		Shares	string
-		Threshold 	string
+	Init struct {
+		Save      bool
+		Shares    string
+		Threshold string
 	}
 	Consul struct {
-		Addr	string
-		Scheme	string
+		Addr   string
+		Scheme string
 	}
 }
 
 const (
-	//configFile = "/Users/atitov/go/src/go-learning/for_test/consul/vault-cli.conf"
 	configFile = "vault-cli.conf"
 )
+
+const unsealKeyTmpl = `{{ block "list" .}}
+{{- range $index, $element := .KeysBase64 }}
+Unseal Key {{ inc $index }}: {{ $element -}}
+{{end}}
+{{"\n"}}Initial Root Token: {{ .RootToken }}
+{{ end }}{{"\n"}}`
 
 /*
 func getNodeOfService(svcName, fld string) (map[string]string) {
@@ -132,7 +139,7 @@ func getNodeOfService(svcName, fld string) (map[string]string) {
 }
 */
 
-func getNodeOfService(consulScheme, consulAddr,svcName string) map[string][]string {
+func getNodeOfService(consulScheme, consulAddr, svcName string) map[string][]string {
 
 	var Service []сonsulServiceResp
 
@@ -153,15 +160,15 @@ func getNodeOfService(consulScheme, consulAddr,svcName string) map[string][]stri
 	}
 
 	var valueSvc = make(map[string][]string)
-	for _, srv := range Service{
-		valueSvc[string(srv.CreateIndex)] = []string{ srv.Address, strconv.Itoa(srv.ServicePort) }
+	for _, srv := range Service {
+		valueSvc[string(srv.CreateIndex)] = []string{srv.Address, strconv.Itoa(srv.ServicePort)}
 		//valueSvc[string(srv.Node)] = []string{ srv.Address, strconv.Itoa(srv.ServicePort) }
 	}
 
 	return valueSvc
 }
 
-func getKVValue(consulScheme, consulAddr, keyKV string) string  {
+func getKVValue(consulScheme, consulAddr, keyKV string) string {
 
 	var Value []сonsulKVResp
 	var valueKV string
@@ -178,10 +185,10 @@ func getKVValue(consulScheme, consulAddr, keyKV string) string  {
 	err = json.Unmarshal(body, &Value)
 	if err != nil {
 		fmt.Println(err)
-		return ""
+		//return ""
 	}
 
-	for _, srv := range Value{
+	for _, srv := range Value {
 		valueKVByte, _ := base64.StdEncoding.DecodeString(srv.Value)
 		valueKV = string(valueKVByte)
 	}
@@ -189,7 +196,7 @@ func getKVValue(consulScheme, consulAddr, keyKV string) string  {
 	return valueKV
 }
 
-func getVaultHealth(healthKey, vaultAddr string) bool  {
+func getVaultHealth(healthKey, vaultAddr string) bool {
 
 	var healthResponse vaultHealthResp
 	apiUrlHealth := fmt.Sprintf("%s/v1/sys/health", vaultAddr)
@@ -219,9 +226,9 @@ func getVaultHealth(healthKey, vaultAddr string) bool  {
 	}
 }
 
-func vaultInit(vaultAddr, secretShares, secretThreshold string) vaultInitResp{
+func vaultInit(vaultAddr, secretShares, secretThreshold string) vaultInitResp {
 
-	var  vaultInit vaultInitResp
+	var vaultInit vaultInitResp
 	apiUrlInit := fmt.Sprintf("%s/v1/sys/init", vaultAddr)
 
 	data := []byte(fmt.Sprintf(`{"secret_shares": %s,"secret_threshold": %s}`, secretShares, secretThreshold))
@@ -238,19 +245,14 @@ func vaultInit(vaultAddr, secretShares, secretThreshold string) vaultInitResp{
 		fmt.Println(err)
 	}
 
-	for n, key := range vaultInit.KeysBase64{
-		fmt.Printf("Unseal Key %d:%s\n", n+1, key)
-	}
-	fmt.Printf("\nInitial Root Token: %s\n\n", vaultInit.RootToken)
-
 	return vaultInit
 }
 
-func vaultUnsealNode(nodeAddr, unsealKey string)  {
+func vaultUnsealNode(nodeAddr, unsealKey string) {
 
 	apiUrlUnseal := fmt.Sprintf("%s/v1/sys/unseal", nodeAddr)
 
-	data := []byte(fmt.Sprintf(`{"key": "%s"}`, unsealKey ))
+	data := []byte(fmt.Sprintf(`{"key": "%s"}`, unsealKey))
 	payload := bytes.NewReader(data)
 	resp, err := http.Post(apiUrlUnseal, "application/json", payload)
 	if err != nil {
@@ -259,16 +261,17 @@ func vaultUnsealNode(nodeAddr, unsealKey string)  {
 	ioutil.ReadAll(resp.Body)
 }
 
-func vaultBootstrap()  {
+func vaultBootstrap() {
 
 	var (
-		keys		[]string
-		initStatus	bool
+		keys       []string
+		initStatus bool
+		tmplToBuf  bytes.Buffer
 	)
 
 	config := readConfig(configFile)
-	vaultScheme := getKVValue(config.Consul.Scheme,config.Consul.Addr, config.Vault.Scheme)
-	service := getNodeOfService(config.Consul.Scheme,config.Consul.Addr,config.Vault.Name)
+	vaultScheme := getKVValue(config.Consul.Scheme, config.Consul.Addr, config.Vault.Scheme)
+	service := getNodeOfService(config.Consul.Scheme, config.Consul.Addr, config.Vault.Name)
 
 	for _, urlNode := range service {
 		nodeAddr := fmt.Sprintf("%s://%s:%s", vaultScheme, urlNode[0], urlNode[1])
@@ -276,11 +279,21 @@ func vaultBootstrap()  {
 		if initStatus == true {
 			fmt.Println("* Vault is already initialized")
 		} else {
-			resp := vaultInit(nodeAddr,config.Init.Shares, config.Init.Threshold)
+			resp := vaultInit(nodeAddr, config.Init.Shares, config.Init.Threshold)
 			keys = resp.KeysBase64
+
+			funcMap := template.FuncMap{
+				"inc": func(i int) int {
+					return i + 1
+				},
+			}
+
+			tpl := template.Must(template.New("tmpl").Funcs(funcMap).Parse(unsealKeyTmpl))
+			tpl.Execute(os.Stdout, resp)
+
 			if config.Init.Save == true {
-				// TODO: It's a future.
-				ioutil.WriteFile("filename", []byte(resp.KeysBase64[0]), 0600)
+				tpl.Execute(&tmplToBuf, resp)
+				ioutil.WriteFile("vault-keys", []byte(tmplToBuf.String()), 0600)
 			}
 		}
 		break
@@ -308,21 +321,21 @@ func vaultBootstrap()  {
 func vaultUnsealCluster() {
 
 	var (
-		keys 		[]string
-		sealStatus 	bool
-		nodeAddr 	string
+		keys       []string
+		sealStatus bool
+		nodeAddr   string
 	)
 
 	in := bufio.NewReader(os.Stdin)
 	keyString, err := in.ReadString('\n')
 	keyString = strings.Replace(keyString, "\n", "", -1)
 	if err == nil {
-		keys = strings.Split(string(keyString),  " ")
+		keys = strings.Split(string(keyString), " ")
 	}
 
 	config := readConfig(configFile)
-	vaultScheme := getKVValue(config.Consul.Scheme,config.Consul.Addr, config.Vault.Scheme)
-	service := getNodeOfService(config.Consul.Scheme,config.Consul.Addr,config.Vault.Name)
+	vaultScheme := getKVValue(config.Consul.Scheme, config.Consul.Addr, config.Vault.Scheme)
+	service := getNodeOfService(config.Consul.Scheme, config.Consul.Addr, config.Vault.Name)
 
 	for nodeName, urlNode := range service {
 		nodeAddr = fmt.Sprintf("%s://%s:%s", vaultScheme, urlNode[0], urlNode[1])
@@ -345,7 +358,7 @@ func vaultUnsealCluster() {
 	}
 }
 
-func readConfig(configFile string) (cfg Config)  {
+func readConfig(configFile string) (cfg Config) {
 
 	err := gcfg.ReadFileInto(&cfg, configFile)
 	if err != nil {
@@ -364,7 +377,7 @@ func readConfig(configFile string) (cfg Config)  {
 	return cfg
 }
 
-func main()  {
+func main() {
 
 	vaultBootstrap()
 
