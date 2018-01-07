@@ -20,7 +20,7 @@ TODO:
  + - Unseal using stdin
  + - Save to file
  - Separate function
- - Function for the connection
+ + Function for the connection
  - Connection using proxy
 */
 
@@ -139,21 +139,38 @@ func getNodeOfService(svcName, fld string) (map[string]string) {
 }
 */
 
-func getNodeOfService(consulScheme, consulAddr, svcName string) map[string][]string {
+func respHTTP(url, methodReq string, metadataHTTP map[string]string, dataHTTP []byte) []byte {
+
+	client := &http.Client{}
+	httpReq, _ := http.NewRequest(methodReq, url, bytes.NewBuffer(dataHTTP))
+	for key, value := range metadataHTTP {
+		httpReq.Header.Add(key, value)
+	}
+	httpResp, err := client.Do(httpReq)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	body, err := ioutil.ReadAll(httpResp.Body)
+	if err != nil {
+		fmt.Println(err)
+	}
+	defer httpResp.Body.Close()
+
+	return body
+}
+
+func getNodeOfService(consulScheme, consulAddr, consulToken, svcName string) map[string][]string {
 
 	var Service []сonsulServiceResp
+	var metadataHTTP map[string]string = map[string]string{
+		"X-Consul-Token": consulToken,
+	}
 
 	apiUrlService := fmt.Sprintf("%s://%s:/v1/catalog/service/%s", consulScheme, consulAddr, svcName)
 
-	resp, err := http.Get(apiUrlService)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	body, _ := ioutil.ReadAll(resp.Body)
-
-	err = json.Unmarshal(body, &Service)
+	body := respHTTP(apiUrlService, "GET", metadataHTTP, nil)
+	err := json.Unmarshal(body, &Service)
 	if err != nil {
 		fmt.Println(err)
 		return nil
@@ -168,24 +185,20 @@ func getNodeOfService(consulScheme, consulAddr, svcName string) map[string][]str
 	return valueSvc
 }
 
-func getKVValue(consulScheme, consulAddr, keyKV string) string {
+func getKVValue(consulScheme, consulAddr, consulToken, keyKV string) string {
 
 	var Value []сonsulKVResp
 	var valueKV string
+	var metadataHTTP map[string]string = map[string]string{
+		"X-Consul-Token": consulToken,
+	}
 
 	apiUrlKV := fmt.Sprintf("%s://%s:/v1/kv/%s", consulScheme, consulAddr, keyKV)
-	resp, err := http.Get(apiUrlKV)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
+	body := respHTTP(apiUrlKV, "GET", metadataHTTP, nil)
 
-	body, _ := ioutil.ReadAll(resp.Body)
-
-	err = json.Unmarshal(body, &Value)
+	err := json.Unmarshal(body, &Value)
 	if err != nil {
 		fmt.Println(err)
-		//return ""
 	}
 
 	for _, srv := range Value {
@@ -199,17 +212,11 @@ func getKVValue(consulScheme, consulAddr, keyKV string) string {
 func getVaultHealth(healthKey, vaultAddr string) bool {
 
 	var healthResponse vaultHealthResp
+
 	apiUrlHealth := fmt.Sprintf("%s/v1/sys/health", vaultAddr)
+	body := respHTTP(apiUrlHealth, "GET", nil, nil)
 
-	resp, err := http.Get(apiUrlHealth)
-	if err != nil {
-		fmt.Println(err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := ioutil.ReadAll(resp.Body)
-
-	err = json.Unmarshal(body, &healthResponse)
+	err := json.Unmarshal(body, &healthResponse)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -229,18 +236,15 @@ func getVaultHealth(healthKey, vaultAddr string) bool {
 func vaultInit(vaultAddr, secretShares, secretThreshold string) vaultInitResp {
 
 	var vaultInit vaultInitResp
-	apiUrlInit := fmt.Sprintf("%s/v1/sys/init", vaultAddr)
-
-	data := []byte(fmt.Sprintf(`{"secret_shares": %s,"secret_threshold": %s}`, secretShares, secretThreshold))
-	payload := bytes.NewReader(data)
-	resp, err := http.Post(apiUrlInit, "application/json", payload)
-	if err != nil {
-		fmt.Println(err)
+	var metadataHTTP map[string]string = map[string]string{
+		"Content-Type": "application/json",
 	}
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	apiUrlInit := fmt.Sprintf("%s/v1/sys/init", vaultAddr)
+	data := []byte(fmt.Sprintf(`{"secret_shares": %s,"secret_threshold": %s}`, secretShares, secretThreshold))
 
-	err = json.Unmarshal(body, &vaultInit)
+	body := respHTTP(apiUrlInit, "POST", metadataHTTP, data)
+	err := json.Unmarshal(body, &vaultInit)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -250,15 +254,12 @@ func vaultInit(vaultAddr, secretShares, secretThreshold string) vaultInitResp {
 
 func vaultUnsealNode(nodeAddr, unsealKey string) {
 
-	apiUrlUnseal := fmt.Sprintf("%s/v1/sys/unseal", nodeAddr)
-
 	data := []byte(fmt.Sprintf(`{"key": "%s"}`, unsealKey))
-	payload := bytes.NewReader(data)
-	resp, err := http.Post(apiUrlUnseal, "application/json", payload)
-	if err != nil {
-		fmt.Println(err)
+	apiUrlUnseal := fmt.Sprintf("%s/v1/sys/unseal", nodeAddr)
+	var metadataHTTP map[string]string = map[string]string{
+		"Content-Type": "application/json",
 	}
-	ioutil.ReadAll(resp.Body)
+	respHTTP(apiUrlUnseal, "POST", metadataHTTP, data)
 }
 
 func vaultBootstrap() {
@@ -269,9 +270,10 @@ func vaultBootstrap() {
 		tmplToBuf  bytes.Buffer
 	)
 
+	consulToken := os.Getenv("CONSUL_HTTP_TOKEN")
 	config := readConfig(configFile)
-	vaultScheme := getKVValue(config.Consul.Scheme, config.Consul.Addr, config.Vault.Scheme)
-	service := getNodeOfService(config.Consul.Scheme, config.Consul.Addr, config.Vault.Name)
+	vaultScheme := getKVValue(config.Consul.Scheme, config.Consul.Addr, consulToken, config.Vault.Scheme)
+	service := getNodeOfService(config.Consul.Scheme, config.Consul.Addr, consulToken, config.Vault.Name)
 
 	for _, urlNode := range service {
 		nodeAddr := fmt.Sprintf("%s://%s:%s", vaultScheme, urlNode[0], urlNode[1])
@@ -333,9 +335,10 @@ func vaultUnsealCluster() {
 		keys = strings.Split(string(keyString), " ")
 	}
 
+	consulToken := os.Getenv("CONSUL_HTTP_TOKEN")
 	config := readConfig(configFile)
-	vaultScheme := getKVValue(config.Consul.Scheme, config.Consul.Addr, config.Vault.Scheme)
-	service := getNodeOfService(config.Consul.Scheme, config.Consul.Addr, config.Vault.Name)
+	vaultScheme := getKVValue(config.Consul.Scheme, config.Consul.Addr, consulToken, config.Vault.Scheme)
+	service := getNodeOfService(config.Consul.Scheme, config.Consul.Addr, consulToken, config.Vault.Name)
 
 	for nodeName, urlNode := range service {
 		nodeAddr = fmt.Sprintf("%s://%s:%s", vaultScheme, urlNode[0], urlNode[1])
