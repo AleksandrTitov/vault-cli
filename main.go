@@ -87,7 +87,8 @@ type Config struct {
 }
 
 const (
-	configFile = "vault-cli.conf"
+	configFile     = "vault-cli.conf"
+	consulTokenEnv = "CONSUL_HTTP_TOKEN"
 )
 
 const unsealKeyTmpl = `{{ block "list" .}}
@@ -270,7 +271,7 @@ func vaultBootstrap() {
 		tmplToBuf  bytes.Buffer
 	)
 
-	consulToken := os.Getenv("CONSUL_HTTP_TOKEN")
+	consulToken := os.Getenv(consulTokenEnv)
 	config := readConfig(configFile)
 	vaultScheme := getKVValue(config.Consul.Scheme, config.Consul.Addr, consulToken, config.Vault.Scheme)
 	service := getNodeOfService(config.Consul.Scheme, config.Consul.Addr, consulToken, config.Vault.Name)
@@ -328,6 +329,9 @@ func vaultUnsealCluster() {
 		nodeAddr   string
 	)
 
+	consulToken := os.Getenv(consulTokenEnv)
+	config := readConfig(configFile)
+
 	in := bufio.NewReader(os.Stdin)
 	keyString, err := in.ReadString('\n')
 	keyString = strings.Replace(keyString, "\n", "", -1)
@@ -335,8 +339,9 @@ func vaultUnsealCluster() {
 		keys = strings.Split(string(keyString), " ")
 	}
 
-	consulToken := os.Getenv("CONSUL_HTTP_TOKEN")
-	config := readConfig(configFile)
+	if strconv.Itoa(len(keys)) != config.Init.Threshold {
+		panic(fmt.Sprintf("The number of 'unseal key' should be equal %s, try again.", config.Init.Threshold))
+	}
 	vaultScheme := getKVValue(config.Consul.Scheme, config.Consul.Addr, consulToken, config.Vault.Scheme)
 	service := getNodeOfService(config.Consul.Scheme, config.Consul.Addr, consulToken, config.Vault.Name)
 
@@ -382,8 +387,28 @@ func readConfig(configFile string) (cfg Config) {
 
 func main() {
 
-	vaultBootstrap()
+	helpMessage := "Usage: vault-cli <command>\n\nCommon commands:\n" +
+		"    bootstrap\t Bootstrap Vault cluster\n" +
+		"    unseal\t Unseal vault cluster"
+	consulTokenErrMessage := fmt.Sprintf("* Variable '%s' is not set.", consulTokenEnv)
 
-	//vaultUnsealCluster()
-
+	if len(os.Args) == 2 {
+		if os.Args[1] == "bootstrap" || os.Args[1] == "b" {
+			if os.Getenv(consulTokenEnv) == "" {
+				fmt.Println(consulTokenErrMessage)
+			} else {
+				vaultBootstrap()
+			}
+		} else if os.Args[1] == "unseal" || os.Args[1] == "u" {
+			if os.Getenv(consulTokenEnv) == "" {
+				fmt.Println(consulTokenErrMessage)
+			} else {
+				vaultUnsealCluster()
+			}
+		} else {
+			fmt.Println(helpMessage)
+		}
+	} else {
+		fmt.Println(helpMessage)
+	}
 }
