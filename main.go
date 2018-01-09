@@ -215,12 +215,12 @@ func vaultBootstrap() {
 		tmplToBuf  bytes.Buffer
 	)
 
-	const 	unsealKeyTmpl  =	`{{ block "list" .}}` +
-								`{{- range $index, $element := .KeysBase64 }}` +
-								`Unseal Key {{ inc $index }}: {{ $element -}}{{"\n"}}` +
-								`{{end}}` +
-								`{{"\n"}}Initial Root Token: {{ .RootToken }}{{"\n\n"}}` +
-								`{{ end }}`
+	const 	unsealKeyTmpl  = `{{ block "list" .}}` +
+				 `{{- range $index, $element := .KeysBase64 }}` +
+				 `Unseal Key {{ inc $index }}: {{ $element -}}{{"\n"}}` +
+				 `{{ end }}` +
+				 `{{"\n"}}Initial Root Token: {{ .RootToken }}{{"\n\n"}}` +
+				 `{{ end }}`
 
 	consulToken := os.Getenv(consulTokenEnv)
 	config := readConfig(configFile)
@@ -339,8 +339,8 @@ func readConfig(configFile string) (cfg Config) {
 func main() {
 
 	helpMessage :=	"Usage: vault-cli <command>\n\nCommon commands:\n" +
-					"* bootstrap\t Bootstrap Vault cluster\n" +
-					"* unseal\t Unseal vault cluster"
+			"* bootstrap\t Bootstrap Vault cluster\n" +
+			"* unseal\t Unseal vault cluster"
 	consulTokenErrMessage := fmt.Sprintf("* Variable '%s' is not set.", consulTokenEnv)
 
 	if len(os.Args) == 2 {
