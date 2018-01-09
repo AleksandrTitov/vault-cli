@@ -15,15 +15,6 @@ import (
 	"text/template"
 )
 
-/*
-TODO:
- + - Unseal using stdin
- + - Save to file
- - Separate function
- + Function for the connection
- - Connection using proxy
-*/
-
 type сonsulServiceResp struct {
 	ID              string
 	Node            string
@@ -91,55 +82,6 @@ const (
 	consulTokenEnv = "CONSUL_HTTP_TOKEN"
 )
 
-const unsealKeyTmpl = `{{ block "list" .}}
-{{- range $index, $element := .KeysBase64 }}
-Unseal Key {{ inc $index }}: {{ $element -}}
-{{end}}
-{{"\n"}}Initial Root Token: {{ .RootToken }}
-{{ end }}{{"\n"}}`
-
-/*
-func getNodeOfService(svcName, fld string) (map[string]string) {
-
-	var Service [] map[string]interface{}
-
-	resp, err := http.Get("http://127.0.0.1:8500/v1/catalog/service/" + svcName)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	respCode := resp.StatusCode
-	if respCode != 200 {
-		fmt.Println("Status code: " + strconv.Itoa(resp.StatusCode))
-	}
-
-	body, _ := ioutil.ReadAll(resp.Body)
-
-	err = json.Unmarshal(body, &Service)
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-
-	if len(Service) == 0 {
-		fmt.Println("Service " + svcName + " not found!")
-		return nil
-	}
-
-	fmt.Println(Service[0][fld])
-
-	var valueSvcFld map[string] string
-	for _, srv := range Service{
-		fmt.Println(srv[fld])
-		//valueSvcFld[srv["Node"]] = srv["ID"]
-	}
-
-	fmt.Println(valueSvcFld)
-	return valueSvcFld//Service
-}
-*/
-
 func respHTTP(url, methodReq string, metadataHTTP map[string]string, dataHTTP []byte) []byte {
 
 	client := &http.Client{}
@@ -164,7 +106,7 @@ func respHTTP(url, methodReq string, metadataHTTP map[string]string, dataHTTP []
 func getNodeOfService(consulScheme, consulAddr, consulToken, svcName string) map[string][]string {
 
 	var Service []сonsulServiceResp
-	var metadataHTTP map[string]string = map[string]string{
+	var metadataHTTP = map[string]string{
 		"X-Consul-Token": consulToken,
 	}
 
@@ -190,7 +132,7 @@ func getKVValue(consulScheme, consulAddr, consulToken, keyKV string) string {
 
 	var Value []сonsulKVResp
 	var valueKV string
-	var metadataHTTP map[string]string = map[string]string{
+	var metadataHTTP = map[string]string{
 		"X-Consul-Token": consulToken,
 	}
 
@@ -237,7 +179,7 @@ func getVaultHealth(healthKey, vaultAddr string) bool {
 func vaultInit(vaultAddr, secretShares, secretThreshold string) vaultInitResp {
 
 	var vaultInit vaultInitResp
-	var metadataHTTP map[string]string = map[string]string{
+	var metadataHTTP = map[string]string{
 		"Content-Type": "application/json",
 	}
 
@@ -255,11 +197,13 @@ func vaultInit(vaultAddr, secretShares, secretThreshold string) vaultInitResp {
 
 func vaultUnsealNode(nodeAddr, unsealKey string) {
 
-	data := []byte(fmt.Sprintf(`{"key": "%s"}`, unsealKey))
-	apiUrlUnseal := fmt.Sprintf("%s/v1/sys/unseal", nodeAddr)
-	var metadataHTTP map[string]string = map[string]string{
+	var metadataHTTP = map[string]string{
 		"Content-Type": "application/json",
 	}
+
+	data := []byte(fmt.Sprintf(`{"key": "%s"}`, unsealKey))
+	apiUrlUnseal := fmt.Sprintf("%s/v1/sys/unseal", nodeAddr)
+
 	respHTTP(apiUrlUnseal, "POST", metadataHTTP, data)
 }
 
@@ -270,6 +214,13 @@ func vaultBootstrap() {
 		initStatus bool
 		tmplToBuf  bytes.Buffer
 	)
+
+	const 	unsealKeyTmpl  =	`{{ block "list" .}}` +
+								`{{- range $index, $element := .KeysBase64 }}` +
+								`Unseal Key {{ inc $index }}: {{ $element -}}{{"\n"}}` +
+								`{{end}}` +
+								`{{"\n"}}Initial Root Token: {{ .RootToken }}{{"\n\n"}}` +
+								`{{ end }}`
 
 	consulToken := os.Getenv(consulTokenEnv)
 	config := readConfig(configFile)
@@ -387,9 +338,9 @@ func readConfig(configFile string) (cfg Config) {
 
 func main() {
 
-	helpMessage := "Usage: vault-cli <command>\n\nCommon commands:\n" +
-		"    bootstrap\t Bootstrap Vault cluster\n" +
-		"    unseal\t Unseal vault cluster"
+	helpMessage :=	"Usage: vault-cli <command>\n\nCommon commands:\n" +
+					"* bootstrap\t Bootstrap Vault cluster\n" +
+					"* unseal\t Unseal vault cluster"
 	consulTokenErrMessage := fmt.Sprintf("* Variable '%s' is not set.", consulTokenEnv)
 
 	if len(os.Args) == 2 {
