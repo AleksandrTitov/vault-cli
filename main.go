@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 )
 
@@ -195,11 +196,12 @@ func vaultInit(vaultAddr, secretShares, secretThreshold string) vaultInitResp {
 	return vaultInit
 }
 
-func vaultUnsealNode(nodeAddr, unsealKey string) {
+func vaultUnsealNode(nodeAddr, unsealKey string, wg *sync.WaitGroup) {
 
 	var metadataHTTP = map[string]string{
 		"Content-Type": "application/json",
 	}
+	defer wg.Done()
 
 	data := []byte(fmt.Sprintf(`{"key": "%s"}`, unsealKey))
 	apiUrlUnseal := fmt.Sprintf("%s/v1/sys/unseal", nodeAddr)
@@ -215,12 +217,12 @@ func vaultBootstrap() {
 		tmplToBuf  bytes.Buffer
 	)
 
-	const 	unsealKeyTmpl  = `{{ block "list" .}}` +
-				 `{{- range $index, $element := .KeysBase64 }}` +
-				 `Unseal Key {{ inc $index }}: {{ $element -}}{{"\n"}}` +
-				 `{{ end }}` +
-				 `{{"\n"}}Initial Root Token: {{ .RootToken }}{{"\n\n"}}` +
-				 `{{ end }}`
+	const unsealKeyTmpl = `{{ block "list" .}}` +
+		`{{- range $index, $element := .KeysBase64 }}` +
+		`Unseal Key {{ inc $index }}: {{ $element -}}{{"\n"}}` +
+		`{{ end }}` +
+		`{{"\n"}}Initial Root Token: {{ .RootToken }}{{"\n\n"}}` +
+		`{{ end }}`
 
 	consulToken := os.Getenv(consulTokenEnv)
 	config := readConfig(configFile)
@@ -254,19 +256,27 @@ func vaultBootstrap() {
 	}
 
 	if initStatus == false {
+
+		threshold, _ := strconv.Atoi(config.Init.Threshold)
+
 		for nodeName, urlNode := range service {
 			nodeAddr := fmt.Sprintf("%s://%s:%s", vaultScheme, urlNode[0], urlNode[1])
 
 			fmt.Printf("* Unseal node %s: %s\n\n", nodeName, nodeAddr)
-			for num, key := range keys {
-				sealStatus := getVaultHealth("Sealed", nodeAddr)
-				if sealStatus == false {
-					fmt.Println("\n* Node unsealed\n")
-					break
-				} else {
-					fmt.Printf("Use key %d: %s\n", num+1, key)
-					vaultUnsealNode(nodeAddr, key)
-				}
+
+			wg := &sync.WaitGroup{}
+
+			for num, key := range keys[:threshold] {
+				fmt.Printf("Use key %d: %s\n", num+1, key)
+				wg.Add(1)
+				go vaultUnsealNode(nodeAddr, key, wg)
+			}
+			wg.Wait()
+			sealStatus := getVaultHealth("Sealed", nodeAddr)
+			if sealStatus == false {
+				fmt.Println("\n* Node successful unsealed\n")
+			} else {
+				fmt.Println("\n* Node didn't unsealed\n")
 			}
 		}
 	}
@@ -303,10 +313,14 @@ func vaultUnsealCluster() {
 		if sealStatus == false {
 			fmt.Printf("* Node %s already unsealed\n\n", nodeName)
 		} else {
+			wg := &sync.WaitGroup{}
+
 			for num, key := range keys {
 				fmt.Printf("Use key %d: %s\n", num+1, key)
-				vaultUnsealNode(nodeAddr, key)
+				wg.Add(1)
+				go vaultUnsealNode(nodeAddr, key, wg)
 			}
+			wg.Wait()
 			sealStatus = getVaultHealth("Sealed", nodeAddr)
 			if sealStatus == false {
 				fmt.Println("\n* Node successful unsealed\n")
@@ -338,9 +352,9 @@ func readConfig(configFile string) (cfg Config) {
 
 func main() {
 
-	helpMessage :=	"Usage: vault-cli <command>\n\nCommon commands:\n" +
-			"* bootstrap\t Bootstrap Vault cluster\n" +
-			"* unseal\t Unseal vault cluster"
+	helpMessage := "Usage: vault-cli <command>\n\nCommon commands:\n" +
+		"* bootstrap\t Bootstrap Vault cluster\n" +
+		"* unseal\t Unseal vault cluster"
 	consulTokenErrMessage := fmt.Sprintf("* Variable '%s' is not set.", consulTokenEnv)
 
 	if len(os.Args) == 2 {
